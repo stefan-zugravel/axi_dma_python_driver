@@ -3,8 +3,9 @@ import mmap
 import struct
 import argparse
 import time
+import socket
 
-from multiprocessing import Process, Array, Value, Manager
+from multiprocessing import Process, Array, Value, Manager, Queue
 
 # Register Offsets
 MM2S_CONTROL_REGISTER       = 0x00
@@ -455,6 +456,66 @@ def do_fill_memory_high_speed(data_buffer_array, total_transmitted_bytes, do_fil
         print(f"--->    KeyboardInterrupt occurred for fill memory high speed process")
 #######################################################################
 
+
+
+####################################################################### WIP  --> aded timeout_period, added data_buffer_limit
+def do_fill_memory_high_speed_socket(data_buffer_array, total_transmitted_bytes, do_fill_memory_while, polling_period, max_packet_size, timeout_period, data_buffer_limit, stop, debug, data_buffer_array_order):
+    try:
+        print(f"- S2MM info --> Started fill memory high speed process | Polling period: {polling_period/10} ms | Max packet size: {max_packet_size} bytes | Timeout period: {timeout_period} ms | Data buffer limit: {data_buffer_limit} bytes")
+        print("")
+        while (do_fill_memory_while.value == 0):
+            if ((int(read_dma(gpio_virtual_addr2, 0x0)))>10):
+                if data_buffer_array[0] == 0:
+                    write_dma(dma_virtual_addr, S2MM_DST_ADDRESS_REGISTER  , (0x0f000000))
+                    write_dma(dma_virtual_addr, S2MM_BUFF_LENGTH_REGISTER  , max_packet_size)
+                    dma_s2mm_sync(dma_virtual_addr)
+                    data_buffer_array[0] =  read_dma(dma_virtual_addr, S2MM_BUFF_LENGTH_REGISTER)
+                    #data_buffer_array_order.append(0)
+                    data_buffer_queue.put(0)
+                    total_transmitted_bytes.value = total_transmitted_bytes.value  + data_buffer_array[0]
+
+                elif data_buffer_array[1] == 0:
+                    write_dma(dma_virtual_addr, S2MM_DST_ADDRESS_REGISTER  , (0x0f400000))
+                    write_dma(dma_virtual_addr, S2MM_BUFF_LENGTH_REGISTER  , max_packet_size)
+                    dma_s2mm_sync(dma_virtual_addr)
+                    data_buffer_array[1] =  read_dma(dma_virtual_addr, S2MM_BUFF_LENGTH_REGISTER)
+                    #data_buffer_array_order.append(1)
+                    data_buffer_queue.put(1)
+                    total_transmitted_bytes.value = total_transmitted_bytes.value  + data_buffer_array[1]
+
+                elif data_buffer_array[2] == 0:
+                    write_dma(dma_virtual_addr, S2MM_DST_ADDRESS_REGISTER  , (0x0f800000))
+                    write_dma(dma_virtual_addr, S2MM_BUFF_LENGTH_REGISTER  , max_packet_size)
+                    dma_s2mm_sync(dma_virtual_addr)
+                    data_buffer_array[2] =  read_dma(dma_virtual_addr, S2MM_BUFF_LENGTH_REGISTER)
+                    #data_buffer_array_order.append(2)
+                    data_buffer_queue.put(2)
+                    total_transmitted_bytes.value = total_transmitted_bytes.value  + data_buffer_array[2]
+
+                elif data_buffer_array[3] == 0:
+                    write_dma(dma_virtual_addr, S2MM_DST_ADDRESS_REGISTER  , (0x0fc00000))
+                    write_dma(dma_virtual_addr, S2MM_BUFF_LENGTH_REGISTER  , max_packet_size)
+                    dma_s2mm_sync(dma_virtual_addr)
+                    data_buffer_array[3] =  read_dma(dma_virtual_addr, S2MM_BUFF_LENGTH_REGISTER)
+                    #data_buffer_array_order.append(3)
+                    data_buffer_queue.put(3)
+                    total_transmitted_bytes.value = total_transmitted_bytes.value  + data_buffer_array[3]
+
+                else :
+                    print(f"Backpressure detected  --> {data_buffer_array_order}")
+                    time.sleep(polling_period/10000)
+        time.sleep(0.005)
+        stop.value = 1
+        print("")
+        print("- S2MM info --> Ended fill memory high speed process")
+    except KeyboardInterrupt:
+        print("")
+        print(f"--->    KeyboardInterrupt occurred for fill memory high speed process")
+#######################################################################
+
+
+
+
 def do_write_memory(data_buffer_array, total_transmitted_bytes, do_write_memory_while, polling_period, file_name, file_type, stop, debug, data_buffer_array_order):
     try:
         print(f"- S2MM info --> Started write memory process | Polling period: {polling_period/10} ms | File name: {file_name} | File type: {file_type}")
@@ -542,6 +603,103 @@ def do_write_memory(data_buffer_array, total_transmitted_bytes, do_write_memory_
         #print(f"###     Total transmitted bytes : {total_transmitted_bytes_value:.2f}")
         #print(f"###     Total written bytes     : {total_written_bytes:.2f}")
         #print(f"###     Avg transmission speed  : {total_written_bytes / (current_time - start_time) / 1000000:.2f} MB/s")
+
+    except KeyboardInterrupt:
+        print("--->    KeyboardInterrupt occurred for write memory process                                                                                     ")
+        print("###     ")
+        print("###     ")
+        print("###     ")
+        print(f"###     Total elapsed time      : {current_time - start_time:.2f} s")
+        print(f"###     Total transmitted bytes : {total_transmitted_bytes_value:.2f}")
+        print(f"###     Total written bytes     : {total_written_bytes:.2f}")
+        print(f"###     Avg transmission speed  : {total_written_bytes / (current_time - start_time) / 1000000:.2f} MB/s")
+
+
+#######################################################################
+
+def do_send_socket(data_buffer_array, total_transmitted_bytes, do_write_memory_while, polling_period, stop, debug, data_buffer_array_order, HOST, PORT_TCP):
+    try:
+        print(f"- S2MM info --> Started write memory process | Polling period: {polling_period/10} ms")
+        print(f"- S2MM info --> Connecting to socket as client")
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
+            client.connect((HOST, PORT_TCP))
+            print("")
+            packet_length                  = 0
+            total_written_bytes            = 0
+            total_transmitted_bytes_value  = 0
+            #time.sleep(0.1)
+            while data_buffer_array[0] == 0 :
+                time.sleep(polling_period/10000)
+            start_time = time.time()
+            current_time = start_time
+            if debug:
+                print(data_buffer_array[0] > 0)
+                print(data_buffer_array_order)
+                print(data_buffer_array_order[0] == 0)
+            while do_write_memory_while.value == 0 or stop.value == 0:
+                if   data_buffer_array[0] > 0 and data_buffer_array_order[0] == 0:
+                    if debug:
+                        print(f"Wrote memory 0 ----> {data_buffer_array_order}")
+                    packet_length = struct.pack("!I", data_buffer_array[0])
+                    client.sendall(packet_length + virtual_dst_addr[0x00000000 : 0x00000000 + data_buffer_array[0]])
+                    total_written_bytes = total_written_bytes + data_buffer_array[0]
+                    total_transmitted_bytes_value = total_transmitted_bytes.value
+                    data_buffer_array[0] = 0
+                    data_buffer_array_order.pop(0)
+                    current_time = time.time()
+                    print(f"- S2MM info --> Elapsed time {(current_time - start_time):.2f} s | Total transmitted bytes {total_transmitted_bytes_value:.2f} | Total written bytes {total_written_bytes:.2f} | AVG transmission speed {total_written_bytes / (current_time - start_time) / 1000000:.2f} MB/s", end='\r')
+
+                elif data_buffer_array[1] > 0 and data_buffer_array_order[0] == 1:
+                    if debug:
+                        print(f"Wrote memory 1 ----> {data_buffer_array_order}") 
+                    packet_length = struct.pack("!I", data_buffer_array[1])
+                    client.sendall(packet_length + virtual_dst_addr[0x00400000 : 0x00400000 + data_buffer_array[1]])
+                    total_written_bytes = total_written_bytes + data_buffer_array[1]
+                    total_transmitted_bytes_value = total_transmitted_bytes.value
+                    data_buffer_array[1] = 0
+                    data_buffer_array_order.pop(0)
+                    current_time = time.time()
+                    print(f"- S2MM info --> Elapsed time {(current_time - start_time):.2f} s | Total transmitted bytes {total_transmitted_bytes_value:.2f} | Total written bytes {total_written_bytes:.2f} | AVG transmission speed {total_written_bytes / (current_time - start_time) / 1000000:.2f} MB/s", end='\r')
+
+                elif data_buffer_array[2] > 0 and data_buffer_array_order[0] == 2:
+                    if debug:
+                        print(f"Wrote memory 2 ----> {data_buffer_array_order}") 
+                    packet_length = struct.pack("!I", data_buffer_array[2])
+                    client.sendall(packet_length + virtual_dst_addr[0x00800000 : 0x00800000 + data_buffer_array[2]])
+                    total_written_bytes = total_written_bytes + data_buffer_array[2]
+                    total_transmitted_bytes_value = total_transmitted_bytes.value
+                    data_buffer_array[2] = 0
+                    data_buffer_array_order.pop(0)
+                    current_time = time.time()
+                    print(f"- S2MM info --> Elapsed time {(current_time - start_time):.2f} s | Total transmitted bytes {total_transmitted_bytes_value:.2f} | Total written bytes {total_written_bytes:.2f} | AVG transmission speed {total_written_bytes / (current_time - start_time) / 1000000:.2f} MB/s", end='\r')
+
+                elif data_buffer_array[3] > 0 and data_buffer_array_order[0] == 3:
+                    if debug:
+                        print(f"Wrote memory 3 ----> {data_buffer_array_order}") 
+                    packet_length = struct.pack("!I", data_buffer_array[3])
+                    client.sendall(packet_length + virtual_dst_addr[0x00c00000 : 0x00c00000 + data_buffer_array[3]])
+                    total_written_bytes = total_written_bytes + data_buffer_array[3]
+                    total_transmitted_bytes_value = total_transmitted_bytes.value
+                    data_buffer_array[3] = 0
+                    data_buffer_array_order.pop(0)
+                    current_time = time.time()
+                    print(f"- S2MM info --> Elapsed time {(current_time - start_time):.2f} s | Total transmitted bytes {total_transmitted_bytes_value:.2f} | Total written bytes {total_written_bytes:.2f} | AVG transmission speed {total_written_bytes / (current_time - start_time) / 1000000:.2f} MB/s", end='\r')
+
+                else :
+                    time.sleep(polling_period/10000)
+                    total_transmitted_bytes_value = total_transmitted_bytes.value
+                    current_time = time.time()
+                    print(f"- S2MM info --> Elapsed time {(current_time - start_time):.2f} s | Total transmitted bytes {total_transmitted_bytes_value:.2f} | Total written bytes {total_written_bytes:.2f} | AVG transmission speed {total_written_bytes / (current_time - start_time) / 1000000:.2f} MB/s", end='\r')
+
+            print("")
+            print("- S2MM info --> Ended write memory process")
+            #print("###     ")
+            #print("###     ")
+            #print("###     ")
+            #print(f"###     Total elapsed time      : {current_time - start_time:.2f} s")
+            #print(f"###     Total transmitted bytes : {total_transmitted_bytes_value:.2f}")
+            #print(f"###     Total written bytes     : {total_written_bytes:.2f}")
+            #print(f"###     Avg transmission speed  : {total_written_bytes / (current_time - start_time) / 1000000:.2f} MB/s")
 
     except KeyboardInterrupt:
         print("--->    KeyboardInterrupt occurred for write memory process                                                                                     ")
@@ -664,7 +822,119 @@ def do_benchmark(NumberOfEvents, period, packet_size, polling_period, file_name,
         print("")
         print("--->    KeyboardInterrupt occurred for benchmark process")
 
+def start_tcp_server_original(HOST, PORT_TCP):
+    """TCP echo server."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((HOST, PORT_TCP))
+        server.listen(1)
+        conn, _ = server.accept()
+        with conn:
+            while True:
+                length_data = conn.recv(4)
+                length = struct.unpack("!I", length_data)[0]
+                data = conn.recv(length)
+                conn.sendall(b'ACK')  # Acknowledge receipt
 
+import socket
+import struct
+
+def start_tcp_server(HOST, PORT_TCP, file_path):
+    """TCP echo server that saves received data to a file."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((HOST, PORT_TCP))
+        server.listen(1)
+        conn, _ = server.accept()
+        
+        with conn:
+            while True:
+                length_data = conn.recv(4)
+                if not length_data:
+                    break  # Connection closed
+                
+                length = struct.unpack("!I", length_data)[0]
+                
+                # Ensure we receive all 'length' bytes
+                data = b""
+                while len(data) < length:
+                    packet = conn.recv(length - len(data))
+                    if not packet:
+                        break  # Connection closed unexpectedly
+                    data += packet
+                
+                # Save data to file
+                with open(file_path, 'ab') as file:
+                    file.write(data)
+                
+                conn.sendall(b'ACK')  # Acknowledge receipt
+
+
+def do_benchmark_tcp(NumberOfEvents, period, packet_size, polling_period, max_packet_size, fill_process_type, timeout_period, data_buffer_limit, debug, file_path):
+    try:
+
+        print(r""" The parrot is just for fun. Be carefull. It was a  pirate...
+ For any questions contact Stefan Cristi Zugravel or Valerio Pagliarino.
+
+                           _------.
+                          /  ,     \_
+                        /   /  /{}\ |o\_
+                       /    \  `--' /-' \    
+                      |      \      \    |
+                     |              |`-, |
+                     /              /__/)/
+                    |              |       ARRRG MATEY
+                    
+ Remember that YOU have to start manually the receiving server before this benchmark!
+                """)
+
+        data_buffer_array       = Array('i', [0, 0, 0, 0])
+
+        #manager = Manager()
+        #data_buffer_array_order = manager.list()
+        data_buffer_queue = Queue(maxsize=4)
+        
+        total_transmitted_bytes = Value('i', 0)
+        do_write_memory_while   = Value('i', 0)
+        do_fill_memory_while    = Value('i', 0)
+        stop                    = Value('i', 0)
+
+        #HOST = '127.0.0.1'
+        HOST = '192.168.2.1'
+        PORT_TCP = 5001
+
+        do_configure()
+
+        #p0 = Process(target=start_tcp_server, args=(HOST, PORT_TCP, file_path ,))
+        #p0.start()
+
+        if fill_process_type == "standard" :
+            p1 = Process(target=do_fill_memory , args=(data_buffer_array, total_transmitted_bytes, do_fill_memory_while, polling_period, max_packet_size, stop, debug, data_buffer_array_order, ))
+            p1.start()
+        elif fill_process_type == "buffered" :
+            p1 = Process(target=do_fill_memory_high_speed_socket , args=(data_buffer_array, total_transmitted_bytes, do_fill_memory_while, polling_period, max_packet_size, timeout_period, data_buffer_limit, stop, debug, data_buffer_array_order, ))
+            p1.start()
+        else :
+            print("***  ERROR  *** | Please choise 'standard' or 'buffered' options")
+
+        p2 = Process(target=do_send_socket, args=(data_buffer_array, total_transmitted_bytes, do_write_memory_while, polling_period, stop, debug, data_buffer_array_order, HOST, PORT_TCP, ))
+        p2.start()
+
+        time.sleep(1)
+        p3 = Process(target=do_load_fifo_rate_not_verbose, args=(NumberOfEvents, period, packet_size, ))
+        p3.start()
+        p3.join()
+        do_write_memory_while.value = 1
+        do_fill_memory_while.value = 1
+
+        p1.join()
+        p2.join()
+        print("")
+        print("")
+    except KeyboardInterrupt:
+        print("")
+        print("")
+        print("--->    KeyboardInterrupt occurred for benchmark process")
 
 
 
@@ -976,6 +1246,7 @@ def main():
 
     parser.add_argument('--acquisition', action='store_true', help='Start the data taking. Example usage: eclypse_driver.py --acquisition --polling_period 20 --file_name test.bin --file_type b --max_packet_size 65535')
 
+    parser.add_argument('--benchmark_tcp', action='store_true', help='Perform a transmission speed benchmark. Example usage: python3 eclypse_driver.py --benchmark --number_of_packets 1000 --packet_period 3 --packet_size 60000 --polling_period 20 --file_name test.bin --file_type b --max_packet_size 65535')
 
     parser.add_argument('--mm2s_status', action='store_true', help='Read the MM2S status word')
     parser.add_argument('--s2mm_status', action='store_true', help='Read the S2MM status word')
@@ -1013,6 +1284,8 @@ def main():
         led_config(args.led)
     elif args.benchmark:
         do_benchmark(args.number_of_packets, args.packet_period, args.packet_size, args.polling_period, args.file_name, args.file_type, args.max_packet_size, args.fill_process_type, args.timeout_period, args.data_buffer_limit, args.debug)
+    elif args.benchmark_tcp:
+        do_benchmark_tcp(args.number_of_packets, args.packet_period, args.packet_size, args.polling_period, args.max_packet_size, args.fill_process_type, args.timeout_period, args.data_buffer_limit, args.debug, args.file_name)
     elif args.acquisition:
         do_data_acquisition(args.polling_period, args.file_name, args.file_type, args.max_packet_size, args.fill_process_type, args.timeout_period, args.data_buffer_limit, args.debug)
     elif args.load_fifo_rate:
