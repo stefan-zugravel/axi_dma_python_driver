@@ -5,8 +5,10 @@ import argparse
 import time
 import socket
 
-from multiprocessing import Process, Array, Value, Manager, Queue
-from queue import Empty
+#from multiprocessing import Process, Array, Value, Manager, Queue
+#from queue import Empty
+
+from multiprocessing import Process, Array, Value, RawArray
 
 # Register Offsets
 MM2S_CONTROL_REGISTER       = 0x00
@@ -125,21 +127,12 @@ def dma_mm2s_sync(virtual_addr):
         mm2s_status = read_dma(virtual_addr, MM2S_STATUS_REGISTER)
         if (mm2s_status & IOC_IRQ_FLAG) and (mm2s_status & IDLE_FLAG):
             break
-        #dma_mm2s_status(virtual_addr)
-
-def dma_mm2s_wait_idle(virtual_addr):                    ########  UNUSED -> to be deleted
-    while True:
-        mm2s_status = read_dma(virtual_addr, MM2S_STATUS_REGISTER)
-        if (mm2s_status & IDLE_FLAG):
-            break
-        dma_mm2s_status(virtual_addr)
 
 def dma_s2mm_sync(virtual_addr):
     while True:
         s2mm_status = read_dma(virtual_addr, S2MM_STATUS_REGISTER)
         if (s2mm_status & IOC_IRQ_FLAG) and (s2mm_status & IDLE_FLAG):
             break
-        #dma_s2mm_status(virtual_addr)
 
 def print_mem(virtual_address, byte_count):
     data = virtual_address[:byte_count]
@@ -148,63 +141,6 @@ def print_mem(virtual_address, byte_count):
         if i % 4 == 3:
             print(" ", end="")
     print()
-
-def debug():
-    
-    print("Hello World! - Running DMA transfer test application.")
-
-    print("Writing random data to source register block...")
-    data = [0xEFBEADDE, 0x11223344, 0xABABABAB, 0xCDCDCDCD, 0x00001111, 0x22223333, 0x44445555, 0x66667777]
-    for i, value in enumerate(data):
-        struct.pack_into('<I', virtual_src_addr, i * 4, value)
-
-    print("Clearing the destination register block...")
-    virtual_dst_addr.write(bytes([0] * 32))
-
-    print("Source memory block data:      ", end="")
-    print_mem(virtual_src_addr, 32)
-
-    print("Destination memory block data: ", end="")
-    print_mem(virtual_dst_addr, 32)
-
-    print("Reset the DMA.")
-    write_dma(dma_virtual_addr, S2MM_CONTROL_REGISTER, RESET_DMA)
-    write_dma(dma_virtual_addr, MM2S_CONTROL_REGISTER, RESET_DMA)
-    dma_s2mm_status(dma_virtual_addr)
-    dma_mm2s_status(dma_virtual_addr)
-
-    print("Enable all interrupts.")
-    write_dma(dma_virtual_addr, S2MM_CONTROL_REGISTER, ENABLE_ALL_IRQ)
-    write_dma(dma_virtual_addr, MM2S_CONTROL_REGISTER, ENABLE_ALL_IRQ)
-    dma_s2mm_status(dma_virtual_addr)
-    dma_mm2s_status(dma_virtual_addr)
-
-    print("Writing source address of the data from MM2S in DDR...")
-    write_dma(dma_virtual_addr, MM2S_SRC_ADDRESS_REGISTER, MM2S_OFFSET)
-    print("Writing the destination address for the data from S2MM in DDR...")
-    write_dma(dma_virtual_addr, S2MM_DST_ADDRESS_REGISTER, S2MM_OFFSET)
-
-    print("Run the MM2S channel.")
-    write_dma(dma_virtual_addr, MM2S_CONTROL_REGISTER, RUN_DMA)
-
-    print("Run the S2MM channel.")
-    write_dma(dma_virtual_addr, S2MM_CONTROL_REGISTER, RUN_DMA)
-
-    print("Writing MM2S transfer length of 32 bytes...")
-    write_dma(dma_virtual_addr, MM2S_TRNSFR_LENGTH_REGISTER, 0x00000008)
-
-    print("Writing S2MM transfer length of 32 bytes...")
-    write_dma(dma_virtual_addr, S2MM_BUFF_LENGTH_REGISTER, 0x00000008)
-
-    print("Waiting for MM2S synchronization...")
-    dma_mm2s_sync(dma_virtual_addr)
-
-    print("Waiting for S2MM synchronization...")
-    dma_s2mm_sync(dma_virtual_addr)
-
-    print("Destination memory block: ", end="")
-    print_mem(virtual_dst_addr, 32)
-
 
 def led_config(value):
     print("Performing configuration of the LEDs.")
@@ -459,49 +395,36 @@ def do_fill_memory_high_speed(data_buffer_array, total_transmitted_bytes, do_fil
 
 
 
-####################################################################### WIP  --> aded timeout_period, added data_buffer_limit
-def do_fill_memory_high_speed_socket(data_buffer_array, total_transmitted_bytes, do_fill_memory_while, polling_period, max_packet_size, timeout_period, data_buffer_limit, debug, data_buffer_queue):
+def do_fill_memory_high_speed_socket(data_buffer_array, total_transmitted_bytes, do_fill_memory_while, polling_period, max_packet_size, timeout_period, data_buffer_limit, debug, data_buffer_queue, BUFFER_SIZE, write_index):
     try:
         print(f"- S2MM info --> Started fill memory high speed socket process | Polling period: {polling_period/10} ms | Max packet size: {max_packet_size} bytes | Timeout period: {timeout_period} ms | Data buffer limit: {data_buffer_limit} bytes")
         print("")
-        # With 128 KB of allocated memory for index I could have 128 registers thanks to the 16 MB of allocated memory
-        # I will only use 120 spaces
         packet_count = 0
-        index_range  = 240
         index        = 0
-        dma_tranfer_time       = 0
-        dma_tranfer_time_start = 0
-        dma_tranfer_time_end   = 0
-        #I must initialize the array to zero
-        for ind in range(240):
+        for ind in range(BUFFER_SIZE):
             data_buffer_array[ind] = 0
-
+        
         while (do_fill_memory_while.value == 0):
             if (read_dma(gpio_virtual_addr2, 0x0)>10):
                 if data_buffer_array[index] == 0:
-                    write_dma(dma_virtual_addr, S2MM_DST_ADDRESS_REGISTER  , (251658240 + (index*65536)))
+                    write_dma(dma_virtual_addr, S2MM_DST_ADDRESS_REGISTER  , (0x0F000000 + (index*64*1024)))
                     write_dma(dma_virtual_addr, S2MM_BUFF_LENGTH_REGISTER  , max_packet_size)
-                    dma_tranfer_time_start = time.time() #debug
                     dma_s2mm_sync(dma_virtual_addr)
-                    dma_tranfer_time_end = time.time() #debug
-                    dma_tranfer_time = dma_tranfer_time + (dma_tranfer_time_end - dma_tranfer_time_start) #debug
                     data_buffer_array[index] =  read_dma(dma_virtual_addr, S2MM_BUFF_LENGTH_REGISTER)
-                    data_buffer_queue.put(index)
                     total_transmitted_bytes.value = total_transmitted_bytes.value  + data_buffer_array[index]
-                    index = (index + 1) % (index_range)  # Circular increment
+                    with write_index.get_lock():
+                        data_buffer_queue[write_index.value] = index
+                        write_index.value = (write_index.value + 1) % BUFFER_SIZE
+                    index = (index + 1) % BUFFER_SIZE
                     packet_count += 1
                 else:
                     print(f"backpressure detected on index: {index} and packet counter: {packet_count}")
             time.sleep(polling_period/10000)
         print("")
         print("- S2MM info --> Ended fill memory high speed socket process")
-        print(f"- S2MM info --> Avegare DMA S2MM speed: {(total_transmitted_bytes.value/1e6)/dma_tranfer_time} MB/s") #debug
     except KeyboardInterrupt:
         print("")
         print(f"--->    KeyboardInterrupt occurred for fill memory high speed process")
-#######################################################################
-
-
 
 
 def do_write_memory(data_buffer_array, total_transmitted_bytes, do_write_memory_while, polling_period, file_name, file_type, stop, debug, data_buffer_array_order):
@@ -605,7 +528,85 @@ def do_write_memory(data_buffer_array, total_transmitted_bytes, do_write_memory_
 
 #######################################################################
 
-def do_send_socket(data_buffer_array, total_transmitted_bytes, do_write_memory_while, polling_period, debug, data_buffer_queue, HOST, PORT_TCP):
+# Pre-allocate headers for all possible packet sizes
+header_cache = {
+    size: struct.pack("!I", size) 
+    for size in range(1, 65536)
+}
+
+def do_send_socket_no_print(data_buffer_array, total_transmitted_bytes, do_write_memory_while, polling_period, debug, data_buffer_queue, HOST, PORT_TCP, BUFFER_SIZE, write_index, read_index):
+    try:
+        print(f"- S2MM info --> Started TCP send memory process | Polling period: {polling_period/10} ms")
+        print(f"- S2MM info --> Connecting to socket as client | HOST: {HOST} | PORT: {PORT_TCP}")
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
+            # Disable Nagle + increase send buffer
+            client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4*1024*1024)  # 4MB buffer
+            client.connect((HOST, PORT_TCP))
+
+            print("")
+            index                = 0
+            total_written_bytes  = 0
+            PRINT_INTERVAL       = 0.2 # seconds
+            
+            # DEBUG TIME #
+            counter = 0
+
+            indexing = 0
+            indexing_time = 0
+            sendall = 0
+            sendall_time = 0
+            deindexing = 0
+            deindexing_time = 0
+            debug = 0
+            debug_time = 0
+            total = 0
+            # DEBUG TIME #
+
+            while data_buffer_array[0] == 0 :
+                time.sleep(polling_period/10000)
+            start_time = time.time()
+            while do_write_memory_while.value == 0 or (read_index.value != write_index.value):
+                now_time = time.time()                           # DEBUG TIME #
+                if read_index.value != write_index.value:
+                    index = data_buffer_queue[read_index.value]
+                    indexing_time = time.time()                  # DEBUG TIME #
+                    client.sendall(header_cache[data_buffer_array[index]] + virtual_dst_addr[(index*64*1024) : (index*64*1024) + data_buffer_array[index]])
+                    sendall_time = time.time()                   # DEBUG TIME #
+                    read_index.value = (read_index.value + 1) % BUFFER_SIZE
+                    total_written_bytes += data_buffer_array[index]
+                    data_buffer_array[index] = 0
+                    deindexing_time = time.time()                # DEBUG TIME #
+                    indexing   += (indexing_time-now_time)       # DEBUG TIME #
+                    sendall    += (sendall_time-indexing_time)   # DEBUG TIME #
+                    deindexing += (deindexing_time-sendall_time) # DEBUG TIME #
+                    counter    += 1                              # DEBUG TIME #
+                    debug_time  = time.time()                    # DEBUG TIME #
+                    debug      += (debug_time-deindexing_time)   # DEBUG TIME #
+                    total      += (debug_time-now_time)          # DEBUG TIME #
+
+                else:
+                    time.sleep(polling_period/10000)
+
+            current_time = time.time()
+            print(f"- S2MM info --> Elapsed time {(current_time - start_time):.2f} s | Total transmitted bytes {total_transmitted_bytes.value:.2f} | Total written bytes {total_written_bytes:.2f} | AVG transmission speed {total_written_bytes / (current_time - start_time) / 1000000:.2f} MB/s", end='\r')
+            print("")
+            print("- S2MM info --> Ended TCP send memory process")
+            print("")
+            print(f"#################     DEBUG     #################")
+            print(f"packets sent        : {counter}")
+            print(f"avg indexing time   : {(indexing/counter)*1000:.3f} ms |  {100*(indexing/total):.2f} %")
+            print(f"avg sendall time    : {(sendall/counter)*1000:.3f} ms |  {100*(sendall/total):.2f} %  -> {total_written_bytes/sendall/1e6:.3f} MBps")
+            print(f"avg deindexing time : {(deindexing/counter)*1000:.3f} ms |  {100*(deindexing/total):.2f} %")
+            print(f"avg debug time      : {(debug/counter)*1000:.3f} ms |  {100*(debug/total):.2f} %")
+            print(f"avg total time      : {(total/counter)*1000:.3f} ms |  {100*(total/total):.2f} %")
+    except KeyboardInterrupt:
+        print("--->    KeyboardInterrupt occurred for TCP send memory process")
+        print("###     ")
+        print(f"- S2MM info --> Elapsed time {(current_time - start_time):.2f} s | Total transmitted bytes {total_transmitted_bytes.value:.2f} | Total written bytes {total_written_bytes:.2f} | AVG transmission speed {total_written_bytes / (current_time - start_time) / 1000000:.2f} MB/s", end='\r')
+
+
+def do_send_socket(data_buffer_array, total_transmitted_bytes, do_write_memory_while, polling_period, debug, data_buffer_queue, HOST, PORT_TCP, BUFFER_SIZE, write_index, read_index):
     try:
         print(f"- S2MM info --> Started TCP send memory process | Polling period: {polling_period/10} ms")
         print(f"- S2MM info --> Connecting to socket as client | HOST: {HOST} | PORT: {PORT_TCP}")
@@ -623,20 +624,50 @@ def do_send_socket(data_buffer_array, total_transmitted_bytes, do_write_memory_w
             start_time = time.time()
             current_time = start_time
             last_print   = start_time
-            while do_write_memory_while.value == 0 or not data_buffer_queue.empty():
-                try:
-                    index = data_buffer_queue.get_nowait()
-                    packet_length = struct.pack("!I", data_buffer_array[index])
-                    client.sendall(packet_length + virtual_dst_addr[(index*65536) : (index*65536) + data_buffer_array[index]])
-                    total_written_bytes = total_written_bytes + data_buffer_array[index]
-                    data_buffer_array[index] = 0
-                    current_time = time.time()
-                    if current_time - last_print > PRINT_INTERVAL:
-                        print(f"- S2MM info --> Elapsed time {(current_time - start_time):.2f} s | Total transmitted bytes {total_transmitted_bytes.value:.2f} | Total written bytes {total_written_bytes:.2f} | AVG transmission speed {total_written_bytes / (current_time - start_time) / 1000000:.2f} MB/s", end='\r')
-                        last_print = current_time
-                except Empty:
-                    time.sleep(polling_period/10000)
-                    current_time = time.time()
+            index = 0
+            ## start debug parameters
+            start_time_cycle = 0
+            got_index_time = 0
+            calculated_packet_length_time = 0
+            end_send_all_time = 0
+            end_time_cycle   = 0
+            packet_length_debug = 0
+            increment_read_index_time = 0
+            ## end   debug parameters
+            with read_index.get_lock():
+                while do_write_memory_while.value == 0 or (read_index.value != write_index.value): #or not data_buffer_queue.empty():
+                    if read_index.value != write_index.value:
+                        start_time_cycle = time.time() # this is for debug
+                        #index = data_buffer_queue[read_idx.value]
+                        index = read_index.value
+                        got_index_time = time.time() # this is for debug
+                        #packet_length = struct.pack("!I", data_buffer_array[index])
+                        packet_length = header_cache[data_buffer_array[index]]
+                        calculated_packet_length_time = time.time() # this is for debug
+                        client.sendall(packet_length + virtual_dst_addr[(index*65536) : (index*65536) + data_buffer_array[index]])
+                        end_send_all_time = time.time() # this is for debug
+                        read_index.value = (read_index.value + 1) % BUFFER_SIZE
+                        
+                        increment_read_index_time = time.time() # this is for debug
+                        total_written_bytes = total_written_bytes + data_buffer_array[index]
+                        packet_length_debug = data_buffer_array[index] #debug
+                        data_buffer_array[index] = 0
+                        current_time = time.time()
+                        if current_time - last_print > PRINT_INTERVAL:
+                            print(f"- S2MM info --> Elapsed time {(current_time - start_time):.2f} s | Total transmitted bytes {total_transmitted_bytes.value:.2f} | Total written bytes {total_written_bytes:.2f} | AVG transmission speed {total_written_bytes / (current_time - start_time) / 1000000:.2f} MB/s", end='\r')
+                            last_print = current_time
+                        end_time_cycle = time.time() # this is for debug
+                        print("###############################################")
+                        print(f"Total time        : {(end_time_cycle - start_time_cycle)*1000:.3f} ms -> {100*(end_time_cycle - start_time_cycle)/(end_time_cycle - start_time_cycle):.3f} %  |")
+                        print(f"Got index time    : {(got_index_time - start_time_cycle)*1000:.3f} ms -> {100*(got_index_time - start_time_cycle)/(end_time_cycle - start_time_cycle):.3f} %  |")
+                        print(f"Packet length time: {(calculated_packet_length_time - got_index_time)*1000:.3f} ms -> {100*(calculated_packet_length_time - got_index_time)/(end_time_cycle - start_time_cycle):.3f} %  |")
+                        print(f"Sendall time      : {(end_send_all_time - calculated_packet_length_time)*1000:.3f} ms -> {100*(end_send_all_time - calculated_packet_length_time)/(end_time_cycle - start_time_cycle):.3f} %  | {(packet_length_debug)/(end_send_all_time - calculated_packet_length_time)/1e6:.3f} MBps")
+                        print(f"Increment time    : {(increment_read_index_time - end_send_all_time)*1000:.3f} ms -> {100*(increment_read_index_time - end_send_all_time)/(end_time_cycle - start_time_cycle):.3f} %  |")
+                        print(f"Print time        : {(end_time_cycle - increment_read_index_time)*1000:.3f} ms -> {100*(end_time_cycle - increment_read_index_time)/(end_time_cycle - start_time_cycle):.3f} %  |")
+                        print(f"SUM = {(100*(got_index_time - start_time_cycle)/(end_time_cycle - start_time_cycle))+(100*(end_time_cycle - increment_read_index_time))+(100*(calculated_packet_length_time - got_index_time)/(end_time_cycle - start_time_cycle))+(100*(end_time_cycle - end_send_all_time)/(end_time_cycle - start_time_cycle))+(100*(end_send_all_time - calculated_packet_length_time)/(end_time_cycle - start_time_cycle)):.3f}")
+                    else:
+                        time.sleep(polling_period/10000)
+                        current_time = time.time()
             print(f"- S2MM info --> Elapsed time {(current_time - start_time):.2f} s | Total transmitted bytes {total_transmitted_bytes.value:.2f} | Total written bytes {total_written_bytes:.2f} | AVG transmission speed {total_written_bytes / (current_time - start_time) / 1000000:.2f} MB/s", end='\r')
             print("")
             print("- S2MM info --> Ended TCP send memory process")
@@ -822,11 +853,15 @@ def do_benchmark_tcp(NumberOfEvents, period, packet_size, polling_period, max_pa
  Remember that YOU have to start manually the receiving server before this benchmark!
                 """)
 
-        data_buffer_array       = Array('i', 240)
+        BUFFER_SIZE       = 240
+        data_buffer_array = Array('i', BUFFER_SIZE)
+        write_index       = Value('i', 0)
+        read_index        = Value('i', 0)
+        data_buffer_queue = RawArray('i', BUFFER_SIZE)
 
         #manager = Manager()
         #data_buffer_array_order = manager.list()
-        data_buffer_queue = Queue(maxsize=240)
+        #data_buffer_queue = Queue(maxsize=240)
         
         total_transmitted_bytes = Value('i', 0)
         do_write_memory_while   = Value('i', 0)
@@ -843,10 +878,11 @@ def do_benchmark_tcp(NumberOfEvents, period, packet_size, polling_period, max_pa
         #p0.start()
 
 
-        p1 = Process(target=do_fill_memory_high_speed_socket , args=(data_buffer_array, total_transmitted_bytes, do_fill_memory_while, polling_period, max_packet_size, timeout_period, data_buffer_limit, debug, data_buffer_queue, ))
+        p1 = Process(target=do_fill_memory_high_speed_socket , args=(data_buffer_array, total_transmitted_bytes, do_fill_memory_while, polling_period, max_packet_size, timeout_period, data_buffer_limit, debug, data_buffer_queue, BUFFER_SIZE, write_index))
         p1.start()
 
-        p2 = Process(target=do_send_socket, args=(data_buffer_array, total_transmitted_bytes, do_write_memory_while, polling_period, debug, data_buffer_queue, HOST, PORT_TCP, ))
+        #p2 = Process(target=do_send_socket, args=(data_buffer_array, total_transmitted_bytes, do_write_memory_while, polling_period, debug, data_buffer_queue, HOST, PORT_TCP, BUFFER_SIZE, write_index, read_index, ))
+        p2 = Process(target=do_send_socket_no_print, args=(data_buffer_array, total_transmitted_bytes, do_write_memory_while, polling_period, debug, data_buffer_queue, HOST, PORT_TCP, BUFFER_SIZE, write_index, read_index, ))
         p2.start()
 
         time.sleep(1)
