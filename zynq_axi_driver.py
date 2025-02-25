@@ -24,6 +24,10 @@ S2MM_BUFF_LENGTH_REGISTER = 0x58
 # Status Flags
 IOC_IRQ_FLAG = 1 << 12
 IDLE_FLAG = 1 << 1
+AXI_DMA_0_ALMOST_FULL_FLAG  = 1<<1
+AXI_DMA_0_ALMOST_EMPTY_FLAG = 1<<0
+AXI_DMA_1_ALMOST_FULL_FLAG  = 1<<3
+AXI_DMA_1_ALMOST_EMPTY_FLAG = 1<<2
 
 # Status Codes
 STATUS_HALTED           = 0x00000001
@@ -56,20 +60,15 @@ MM2S_OFFSET_0  = 0x0001000000
 S2MM_OFFSET_0  = 0x0003000000
 GPIO_2_OFFSET  = 0x00A0030000
 AXIL_0_OFFSET  = 0x00B0000000
-AXIL_1_OFFSET  = 0x00B0010000
+#AXIL_1_OFFSET  = 0x00B0010000
 
 ddr_memory = os.open("/dev/mem", os.O_RDWR | os.O_SYNC)
 
-axi_gpio_2_ctrl_addr = mmap.mmap(ddr_memory, 65536, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=GPIO_2_OFFSET) # 64 KB
-
-axi_dma_0_ctrl_addr  = mmap.mmap(ddr_memory, 65536, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=AXIL_0_OFFSET) # 64 KB
-#axi_dma_1_ctrl_addr  = mmap.mmap(ddr_memory, 65536, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=AXIL_1_OFFSET) # 64 KB
-
 axi_MM2S_0_virtual_addr = mmap.mmap(ddr_memory, 33554432, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=MM2S_OFFSET_0) # 32 MB
 axi_S2MM_0_virtual_addr = mmap.mmap(ddr_memory, 33554432, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=S2MM_OFFSET_0) # 32 MB
-
-
-
+axi_gpio_2_ctrl_addr = mmap.mmap(ddr_memory, 65536, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=GPIO_2_OFFSET) # 64 KB
+axi_dma_0_ctrl_addr  = mmap.mmap(ddr_memory, 65536, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=AXIL_0_OFFSET) # 64 KB
+#axi_dma_1_ctrl_addr  = mmap.mmap(ddr_memory, 65536, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=AXIL_1_OFFSET) # 64 KB
 
 def write_dma(virtual_addr, offset, value):
     virtual_addr.seek(offset)
@@ -248,11 +247,10 @@ def do_fill_memory_high_speed_socket(data_buffer_array, total_transmitted_bytes,
         index        = 0
         for ind in range(BUFFER_SIZE):
             data_buffer_array[ind] = 0
-        
         while (do_fill_memory_while.value == 0):
-            if (read_dma(axi_gpio_2_ctrl_addr, 0x0)>10):
+            if (read_dma(axi_gpio_2_ctrl_addr, 0x0) & AXI_DMA_0_ALMOST_EMPTY_FLAG):
                 if data_buffer_array[index] == 0:
-                    write_dma(axi_dma_0_ctrl_addr, S2MM_DST_ADDRESS_REGISTER  , (0x0F000000 + (index*64*1024)))
+                    write_dma(axi_dma_0_ctrl_addr, S2MM_DST_ADDRESS_REGISTER  , (S2MM_OFFSET_0 + (index*64*1024)))
                     write_dma(axi_dma_0_ctrl_addr, S2MM_BUFF_LENGTH_REGISTER  , max_packet_size)
                     dma_s2mm_sync(axi_dma_0_ctrl_addr)
                     data_buffer_array[index] =  read_dma(axi_dma_0_ctrl_addr, S2MM_BUFF_LENGTH_REGISTER)
