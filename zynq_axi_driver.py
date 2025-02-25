@@ -71,11 +71,18 @@ AXIL_0_OFFSET  = 0x20000000
 
 ddr_memory = os.open("/dev/axi_mem", os.O_RDWR | os.O_SYNC)
 
+'''
 axi_MM2S_0_virtual_addr = mmap.mmap(ddr_memory, 33554432, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=MM2S_OFFSET_0) # 32 MB
 axi_S2MM_0_virtual_addr = mmap.mmap(ddr_memory, 33554432, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=S2MM_OFFSET_0) # 32 MB
 axi_gpio_2_ctrl_addr = mmap.mmap(ddr_memory, 65536, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=GPIO_2_OFFSET) # 64 KB
 axi_dma_0_ctrl_addr  = mmap.mmap(ddr_memory, 65536, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=AXIL_0_OFFSET) # 64 KB
 #axi_dma_1_ctrl_addr  = mmap.mmap(ddr_memory, 65536, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=AXIL_1_OFFSET) # 64 KB
+'''
+
+axi_MM2S_0_virtual_addr = mmap.mmap(ddr_memory, 33554432, mmap.MAP_PRIVATE, mmap.PROT_READ | mmap.PROT_WRITE, offset=MM2S_OFFSET_0) # 32 MB
+axi_S2MM_0_virtual_addr = mmap.mmap(ddr_memory, 33554432, mmap.MAP_PRIVATE, mmap.PROT_READ | mmap.PROT_WRITE, offset=S2MM_OFFSET_0) # 32 MB
+axi_gpio_2_ctrl_addr = mmap.mmap(ddr_memory, 65536, mmap.MAP_PRIVATE, mmap.PROT_READ | mmap.PROT_WRITE, offset=GPIO_2_OFFSET) # 64 KB
+axi_dma_0_ctrl_addr  = mmap.mmap(ddr_memory, 65536, mmap.MAP_PRIVATE, mmap.PROT_READ | mmap.PROT_WRITE, offset=AXIL_0_OFFSET) # 64 KB
 
 def write_dma(virtual_addr, offset, value):
     virtual_addr.seek(offset)
