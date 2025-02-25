@@ -10,8 +10,11 @@ MODULE_AUTHOR("Alberto_Bortone");
 MODULE_DESCRIPTION("AXI Memory Access Driver");
 
 #define DEVICE_NAME "axi_mem"
-#define MEM_BASE_ADDR  0x90000000  // Base address that
-#define MEM_SIZE       0x30000000   
+//#define MEM_BASE_ADDR  0x90000000  // Base address that
+//#define MEM_SIZE       0x30000000   
+
+#define MEM_BASE_ADDR  0xA0030000  // Base address that
+#define MEM_SIZE       0x0000FFFF   
 
 
 static void __iomem *mapped_mem;
