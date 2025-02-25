@@ -56,13 +56,13 @@ ENABLE_ALL_IRQ   = 0x00007000
 # MM2S_OFFSET  = 0x0e000000
 # S2MM_OFFSET  = 0x0f000000
 
-MM2S_OFFSET_0  = 0x0001000000
-S2MM_OFFSET_0  = 0x0003000000
+MM2S_OFFSET_0  = 0x0090000000
+S2MM_OFFSET_0  = 0x0092000000
 GPIO_2_OFFSET  = 0x00A0030000
 AXIL_0_OFFSET  = 0x00B0000000
 #AXIL_1_OFFSET  = 0x00B0010000
 
-ddr_memory = os.open("/dev/mem", os.O_RDWR | os.O_SYNC)
+ddr_memory = os.open("/dev/axi_mem", os.O_RDWR | os.O_SYNC)
 
 axi_MM2S_0_virtual_addr = mmap.mmap(ddr_memory, 33554432, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=MM2S_OFFSET_0) # 32 MB
 axi_S2MM_0_virtual_addr = mmap.mmap(ddr_memory, 33554432, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=S2MM_OFFSET_0) # 32 MB
